@@ -4,8 +4,7 @@ import pandas as pd
 import numpy as np
 from nicegui import ui
 
-# Heroku: bir işçidən çox olmasın (uvicorn import-string problemi olmasın)
-os.environ.setdefault("WEB_CONCURRENCY", "1")
+os.environ["WEB_CONCURRENCY"] = "1"
 
 PORT = int(os.environ.get('PORT', 8080))
 MODEL_PATH = 'artifacts/model.pkl'
@@ -353,3 +352,4 @@ else:
 
 # ---- Run
 ui.run(host='0.0.0.0', port=PORT, reload=False, show=False)
+
