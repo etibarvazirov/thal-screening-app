@@ -7,8 +7,6 @@ from nicegui import ui
 import os
 os.environ.setdefault("WEB_CONCURRENCY", "1")
 
-ALLOW_SERVER_TRAIN = False
-
 PORT = int(os.environ.get('PORT', 8080))
 MODEL_PATH = 'artifacts/model.pkl'
 LABELS = {0: 'Normal', 1: 'Carrier', 2: 'Disease'}
@@ -82,6 +80,7 @@ else:
         ui.button('Predict', on_click=predict).props('unelevated color=primary').classes('mt-2')
 
 ui.run(host='0.0.0.0', port=PORT, reload=False, show=False, workers=1)
+
 
 
 
