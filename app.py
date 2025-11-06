@@ -332,6 +332,7 @@ else:
 
     # disclaimer
     with ui.expansion(lambda: t('disclaimer')).classes('max-w-5xl mx-auto mt-4'):
-        ui.markdown(lambda: t('disc_text'))
+        ui.markdown(t('disc_text'))
 
 ui.run(host='0.0.0.0', port=PORT, reload=False, show=False)
+
