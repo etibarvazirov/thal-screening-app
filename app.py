@@ -1,11 +1,11 @@
 # app.py (defensive)
 
-import os
-os.environ.setdefault("WEB_CONCURRENCY", "1")
-
 import os, sys, subprocess, joblib
 import pandas as pd
 from nicegui import ui
+
+import os
+os.environ.setdefault("WEB_CONCURRENCY", "1")
 
 PORT = int(os.environ.get('PORT', 8080))
 MODEL_PATH = 'artifacts/model.pkl'
@@ -80,4 +80,5 @@ else:
         ui.button('Predict', on_click=predict).props('unelevated color=primary').classes('mt-2')
 
 ui.run(host='0.0.0.0', port=PORT, reload=False, show=False)
+
 
