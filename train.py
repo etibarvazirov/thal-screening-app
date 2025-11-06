@@ -18,9 +18,11 @@ os.makedirs("artifacts", exist_ok=True)
 def map_dx_to_3(s):
     s = s.astype(str).str.lower()
     y = pd.Series(np.nan, index=s.index)
-    y[s.str.contains(r"(disease|major|intermedia|severe|hbh|bart)", na=False)] = 2
-    y[s.str.contains(r"(minor|trait|carrier)", na=False) & y.isna()] = 1
-    y[s.str.contains(r"(normal|healthy|control)", na=False) & y.isna()] = 0
+    # \b və non-capturing (?:...) istifadə edirik; regex xəbərdarlığı yox olur
+    y[s.str.contains(r"\b(?:disease|major|intermedia|severe|hbh|bart)\b",  na=False, case=False)] = 2
+    y[s.str.contains(r"\b(?:minor|trait|carrier)\b",na=False, case=False) & y.isna()] = 1
+    y[s.str.contains(r"\b(?:normal|healthy|control)\b",na=False, case=False) & y.isna()] = 0
+
     return y.astype("Int64")
 
 def upsample_train_only(X_tr, y_tr, random_state=42):
@@ -91,3 +93,4 @@ for name, pipe in models.items():
 
 joblib.dump({"model": best_pipe}, MODEL_PATH)
 print(f"Saved {MODEL_PATH} with model: {best_name}, F1_macro={best_f1:.3f}")
+
