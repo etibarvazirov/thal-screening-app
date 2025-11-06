@@ -1,9 +1,10 @@
-nicegui
-uvicorn
-pandas
-numpy
 scikit-learn==1.7.2
 imbalanced-learn==0.13.0
-joblib
+nicegui==1.4.20
+uvicorn==0.30.1
+pandas==2.2.2
+numpy==1.26.4
+joblib==1.3.2
+
 
 
