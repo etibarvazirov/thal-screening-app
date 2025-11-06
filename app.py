@@ -16,6 +16,49 @@ import re
 
 DASHES = ['–','—','-']  # en/em/hyphen
 
+FILL_DEFAULTS_MODE = 'min'  # alternativ: 'normal_mid'
+
+def to_float_or_none(x):
+    if x is None or x == '': return None
+    try: return float(x)
+    except: return None
+
+def range_mid(v):
+    """Dropdown value: None və ya (a,b) gəlir; orta nöqtəni qaytarır."""
+    if v is None: return None
+    try:
+        a,b = v
+        return round((float(a)+float(b))/2, 6)
+    except:
+        return None
+
+def apply_defaults(row):
+    """Boş rəqəmsal sahələri default ilə doldur: min və ya normal mid."""
+    for k, meta in FIELDS.items():
+        if row.get(k) is None:
+            if FILL_DEFAULTS_MODE == 'min':
+                row[k] = float(meta['min'])
+            else:  # 'normal_mid' -> bins[1] orta
+                a,b = meta['bins'][1]
+                row[k] = round((a+b)/2, 6)
+    return row
+
+def out_of_range_msgs(row):
+    msgs = []
+    EPS = 1e-9
+    for k, meta in FIELDS.items():
+        v = row.get(k, None)
+        if v is None:  # defaults sonra gələcək, burada skip
+            continue
+        try:
+            vf = float(v)
+        except:
+            continue
+        if (vf + EPS) < meta['min'] or (vf - EPS) > meta['max']:
+            msgs.append(f"{meta['label']}: {vf}  ({meta['min']}–{meta['max']})")
+    return msgs
+
+
 def parse_range_mid(text):
     """'a–b' / 'a-b' kimi etiketi orta nöqtəyə çevirir; yoxdursa None."""
     if not text or text.strip() == '—':
@@ -266,10 +309,13 @@ else:
                 with ui.column():
                     ui.label(metaF['label']).classes('text-sm')
 
-                    options = ['—'] + [f"{a}-{b}" for a,b in metaF['bins']]
+                    # label -> value (value: None və ya (a,b))
+                    range_options = {'—': None}
+                    for a,b in metaF['bins']:
+                        label = f"{a}-{b}"        # sadə '-' yazırıq ki, unicode tire problemi olmasın
+                        range_options[label] = (a,b)
+                    dd = ui.select(range_options, value=None).props('outlined dense')
 
-
-                    dd = ui.select(options, value='—').props('outlined dense')
                     num = ui.number(
                         label=f"Manual dəyər ( {metaF['min']}–{metaF['max']} )",
                         min=metaF['min'], max=metaF['max'], step=metaF['step'], value=None
@@ -277,8 +323,10 @@ else:
                     ui.icon('info').classes('text-gray-500').tooltip(metaF['hint'])
 
                     def on_dd_change(e, key=k, meta=metaF, box=num):
-                        mid = parse_range_mid(e.value)
-                        box.value = mid  # mid None olarsa sahə boşalır (normaldır)
+                        mid = range_mid(e.value)  # e.value artıq None və ya (a,b)-dir
+                        box.value = mid
+                    dd.on('update:model-value', on_dd_change)
+
 
                     dd.on('update:model-value', on_dd_change)
 
@@ -300,33 +348,23 @@ else:
                 if k2 in inputs_num: inputs_num[k2].value = v
                 if k2 in inputs_cat and v in (CATS.get(k2, [None, []])[1] or []):
                     inputs_cat[k2].value = v
-            for k2 in inputs_bin: inputs_bin[k2].value = '—'
+            for k2 in inputs_bin: inputs_bin[k2].value = None
             preset_info_box.set_content(PRESET_INFO.get(kind, ''))
 
         def clear_all():
-            # form
             for c in inputs_num.values(): c.value = None
             for c in inputs_cat.values(): c.value = None
-            for c in inputs_bin.values(): c.value = '—'
+            for c in inputs_bin.values(): c.value = None  # ← IMPORTANT: '—' yox, None
             preset_info_box.set_content('')
-        
-            # nəticə mətni
-            res_title.set_text('')
-            res_sub.set_text('')
-            reason_box.set_text('')
-        
-            # qrafikləri sıfırla və gizlət (istəsən görünən də qala bilər)
-            prob_chart.options['series'][0]['data'] = [0, 0, 0]
-            prob_chart.update()
-        
-            radar_chart.options['series'][0]['data'][0]['value'] = [0]*len(radar_keys)
-            radar_chart.update()
-        
+            res_title.set_text(''); res_sub.set_text(''); reason_box.set_text('')
+            prob_chart.options['series'][0]['data'] = [0,0,0]; prob_chart.update()
+            radar_chart.options['series'][0]['data'][0]['value'] = [0]*len(radar_keys); radar_chart.update()
             cmp_chart.options['series'][0]['data'] = [None]*len(cmp_keys)
             cmp_chart.options['series'][1]['data'] = [None]*len(cmp_keys)
             cmp_chart.options['series'][2]['data'] = [None]*len(cmp_keys)
             cmp_chart.options['series'][3]['data'] = [None]*len(cmp_keys)
             cmp_chart.update()
+
 
 
         with ui.row().classes('gap-2 mt-2'):
@@ -456,12 +494,12 @@ else:
 
 
         def predict():
-            # inputları topla (manual üstünlük, sonra dropdown orta nöqtəsi)
+            # inputları topla: manual üstünlük, sonra dropdown orta nöqtə
             row = {}
             for k in FIELDS.keys():
                 manual = to_float_or_none(inputs_num[k].value)
                 if manual is None:
-                    mid = parse_range_mid(inputs_bin[k].value)
+                    mid = range_mid(inputs_bin[k].value)  # None və ya orta nöqtə
                     row[k] = to_float_or_none(mid)
                 else:
                     row[k] = manual
@@ -470,7 +508,16 @@ else:
                 v = inputs_cat[k].value
                 row[k] = v if v not in ('', None) else None
             
+            # boş rəqəmsallara DEFAULT doldur (sənin istəyinlə: minimal dəyər)
+            row = apply_defaults(row)
+            
+            # indi xəbərdarlığı et (artıq yalnış flag almamalıdır)
+            msgs = out_of_range_msgs(row)
+            if msgs:
+                ui.notification('Diapazondan kənar dəyərlər:\n' + '\n'.join(msgs), type='warning', close_button=True)
+            
             df = pd.DataFrame([row])
+
 
             # diapazon xəbərdarlığı
             msgs = out_of_range_msgs(row)
@@ -538,6 +585,7 @@ else:
 
 # ---------------- Run ----------------
 ui.run(host='0.0.0.0', port=PORT, reload=False, show=False)
+
 
 
 
