@@ -12,6 +12,26 @@ MODEL_PATH = 'artifacts/model.pkl'
 DATA_PATH = 'data/HPLC data.csv'
 LABELS = {0: 'Normal', 1: 'Daşıyıcı', 2: 'Xəstə'}
 
+import re
+
+DASHES = ['–','—','-']  # en dash, em dash, hyphen
+
+def parse_range_mid(text):
+    """'a–b' / 'a-b' / 'a — b' kimi mətnlərdən orta nöqtəni qaytarır."""
+    if not text or text.strip() in ('—', '-', '— —', '—–', '— — —', '—', '— —', '—  —'):
+        return None
+    # bütün növ tireləri sadə '-' ilə əvəz et
+    t = text
+    for d in DASHES:
+        t = t.replace(d, '-')
+    # iki ədəd tap
+    nums = re.findall(r'[-+]?\d*\.?\d+', t)
+    if len(nums) >= 2:
+        a = float(nums[0]); b = float(nums[1])
+        return round((a+b)/2, 3)
+    return None
+
+
 # ---------------- Model yüklə / lazım olsa serverdə bir dəfə öyrət ----------------
 def load_or_train_model():
     if os.path.exists(MODEL_PATH):
@@ -231,7 +251,9 @@ else:
             for k, metaF in FIELDS.items():
                 with ui.column():
                     ui.label(metaF['label']).classes('text-sm')
-                    options = ['—'] + [f"{a}–{b}" for a,b in metaF['bins']]
+
+                    options = ['—'] + [f"{a}-{b}" for a,b in metaF['bins']]
+
                     dd = ui.select(options, value='—').props('outlined dense')
                     num = ui.number(
                         label=f"Manual dəyər ( {metaF['min']}–{metaF['max']} )",
@@ -240,13 +262,9 @@ else:
                     ui.icon('info').classes('text-gray-500').tooltip(metaF['hint'])
 
                     def on_dd_change(e, key=k, meta=metaF, box=num):
-                        val = e.value
-                        if val and '–' in val:
-                            a,b = val.split('–')
-                            try:
-                                a=float(a); b=float(b)
-                                box.value = round((a+b)/2, 3)
-                            except: pass
+                        mid = parse_range_mid(e.value)
+                        if mid is not None:
+                            box.value = mid
                     dd.on('update:model-value', on_dd_change)
 
                     inputs_bin[k] = dd
@@ -383,14 +401,22 @@ else:
 
         def predict():
             # inputları topla
+            # inputları topla (manual üstünlük, yoxdursa dropdown-ın orta nöqtəsi)
             row = {}
             for k in FIELDS.keys():
-                v = inputs_num[k].value
-                row[k] = (None if v=='' else v)
+                manual = inputs_num[k].value
+                if manual is None or manual == '':
+                    bin_sel = inputs_bin[k].value
+                    row[k] = parse_range_mid(bin_sel)
+                else:
+                    row[k] = manual
+            
             for k in inputs_cat.keys():
-                row[k] = inputs_cat[k].value if inputs_cat[k].value != '' else None
-
+                v = inputs_cat[k].value
+                row[k] = v if v not in ('', None) else None
+            
             df = pd.DataFrame([row])
+
 
             # diapazon xəbərdarlığı
             msgs = out_of_range_msgs(row)
@@ -458,5 +484,6 @@ else:
 
 # ---------------- Run ----------------
 ui.run(host='0.0.0.0', port=PORT, reload=False, show=False)
+
 
 
