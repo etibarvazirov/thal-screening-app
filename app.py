@@ -1,4 +1,4 @@
-# app.py — HPLC əsaslı Talassemiya Risk Proqnozu (AZ), preset təsvirləri, gözəlləşdirilmiş UI
+# app.py — HPLC əsaslı Talassemiya Risk Proqnozu (AZ), dropdown fix + stabil override + diaqnostika
 import os, sys, subprocess, joblib
 import pandas as pd
 import numpy as np
@@ -14,9 +14,24 @@ LABELS = {0: 'Normal', 1: 'Daşıyıcı', 2: 'Xəstə'}
 
 import re
 
-DASHES = ['–','—','-']  # en/em/hyphen
-
-import re
+# === Canonical field keys (UI/daxili açar adlarını vahidləşdiririk) ===
+KEYS = {
+    'HbA0': 'HbA0',
+    'HbA2': 'HbA2',
+    'HbF': 'HbF',
+    'HB': 'HB',           # hemoglobin
+    'RBC': 'RBC',
+    'MCV': 'MCV',
+    'MCH': 'MCH',
+    'MCHC': 'MCHC',
+    'RDWcv': 'RDWcv',
+    'S_Window': 'S_Window',     # ("S-Window" labelı göstərilə bilər, açar budur)
+    'Unknown': 'Unknown',
+    'Age': 'Age',
+    'Gender': 'Gender',
+    'Weekness': 'Weekness',
+    'Jaundice': 'Jaundice',
+}
 
 FILL_DEFAULTS_MODE = 'normal_mid'   # boş sahələr üçün neytral orta
 MIN_FIELDS_FOR_OVERRIDE = 2         # override üçün tələb olunan açar sahə sayı
@@ -41,19 +56,17 @@ def range_mid_any(v):
     """
     Dropdown dəyəri ola bilər:
       - tuple/list: (a,b)
-      - string: 'a-b' / 'a–b' / 'a — b' / 'a,b' (virgüllə)
+      - string: 'a-b' / 'a–b' / 'a — b' / 'a,b' (vergül dəstəyi)
     Orta nöqtəni qaytarır, yoxdursa None.
     """
     if v is None:
         return None
-    # tuple/list
     if isinstance(v, (tuple, list)) and len(v) == 2:
         try:
             a, b = float(v[0]), float(v[1])
             return round((a + b) / 2, 6)
         except:
             return None
-    # string
     if isinstance(v, str):
         t = v.replace('–', '-').replace('—', '-').replace(' ', '')
         t = t.replace(',', '-')  # '10,40' -> '10-40'
@@ -66,28 +79,26 @@ def range_mid_any(v):
 
 def apply_defaults(row):
     """Boş rəqəmsal sahələri default ilə doldur: normal_mid (neytral)."""
-    for k, meta in FIELDS.items():
-        if row.get(k) is None:
+    for kk, meta in FIELDS.items():
+        if row.get(kk) is None:
             a, b = meta['bins'][1]  # normal aralığın ortası
-            row[k] = round((a + b) / 2, 6)
+            row[kk] = round((a + b) / 2, 6)
     return row
 
 def out_of_range_msgs(row):
     msgs = []
-    for k, meta in FIELDS.items():
-        v = row.get(k, None)
-        if v is None: 
+    EPS = 1e-9
+    for kk, meta in FIELDS.items():
+        v = row.get(kk, None)
+        if v is None:
             continue
         try:
             vf = float(v)
-        except:
+        except Exception:
             continue
-        # Sərhətdən kənardırsə, xəbərdarlıq (snap_to_bounds-dan sonra nadir olar)
-        if vf < meta['min'] or vf > meta['max']:
+        if (vf + EPS) < meta['min'] or (vf - EPS) > meta['max']:
             msgs.append(f"{meta['label']}: {vf}  ({meta['min']}–{meta['max']})")
     return msgs
-
-
 
 # ---------------- Model yüklə / lazım olsa serverdə bir dəfə öyrət ----------------
 def load_or_train_model():
@@ -164,23 +175,9 @@ PRESETS = {
         'S_Window':0,'Unknown':0,'Age':30,'Gender':'M','Weekness':'No','Jaundice':'No'
     },
     'Carrier': {
-        'HbA0': 95.0,
-        'HbA2': 5.5,   # ↑ daha kəskin marker
-        'HbF':  1.5,
-        'RBC':  6.0,   # tez-tez yüksək/normal
-        'HB':   12.2,
-        'MCV':  66,    # ↓ mikrositoz
-        'MCH':  21,    # ↓ hipoxromiya
-        'MCHC': 32.0,
-        'RDWcv': 15.5,
-        'S_Window': 0,
-        'Unknown': 0,
-        'Age': 24,
-        'Gender': 'F',
-        'Weekness': 'No',
-        'Jaundice': 'No'
+        'HbA0':95.0,'HbA2':5.5,'HbF':1.5,'RBC':6.0,'HB':12.2,'MCV':66,'MCH':21,'MCHC':32.0,'RDWcv':15.5,
+        'S_Window':0,'Unknown':0,'Age':24,'Gender':'F','Weekness':'No','Jaundice':'No'
     },
-
     'Disease': {
         'HbA0':60,'HbA2':2.5,'HbF':40,'RBC':3.2,'HB':7.5,'MCV':65,'MCH':19,'MCHC':31,'RDWcv':18.5,
         'S_Window':1.0,'Unknown':0.5,'Age':9,'Gender':'M','Weekness':'Yes','Jaundice':'Yes'
@@ -210,7 +207,7 @@ PRESET_INFO = {
     ),
 }
 
-# ---------------- Köməkçi funksiyalar ----------------
+# ---------------- Köməkçi izah ----------------
 def rule_based_explanation(row: dict) -> str:
     msgs = []
     v = lambda x: row.get(x, None)
@@ -224,23 +221,6 @@ def rule_based_explanation(row: dict) -> str:
     except Exception:
         pass
     return ' • '.join(msgs)
-
-def out_of_range_msgs(row: dict):
-    msgs = []
-    EPS = 1e-9
-    for k, meta in FIELDS.items():
-        v = row.get(k, None)
-        if v is None:
-            continue  # boş sahələrə xəbərdarlıq etmə
-        try:
-            vf = float(v)
-        except Exception:
-            continue
-        # Float yuvarlaqlaşma səhvlərinə elastik davran
-        if (vf + EPS) < meta['min'] or (vf - EPS) > meta['max']:
-            msgs.append(f"{meta['label']}: {vf}  ({meta['min']}–{meta['max']})")
-    return msgs
-
 
 def detect_model_meta(model, meta):
     name = meta.get('model_name')
@@ -272,7 +252,7 @@ with ui.header().classes('app-header text-white'):
             ui.html('<span class="chip">ML Model</span>')
             ui.html('<span class="chip">Education/Research</span>')
 
-# ---------------- Yuxarı məlumat kartı (layihə + dəyişənlər) ----------------
+# ---------------- Yuxarı məlumat kartı ----------------
 with ui.card().classes('app-card max-w-6xl mx-auto mt-6'):
     with ui.row().classes('items-center gap-2'):
         ui.icon('analytics').classes('text-indigo-600')
@@ -310,9 +290,15 @@ else:
 
         inputs_num, inputs_bin, inputs_cat = {}, {}, {}
 
+        def on_dd_change_factory(k_canon, num_box):
+            def _handler(e):
+                mid = range_mid_any(e.value)     # '10-40' / '10,40' / (10,40) → orta
+                num_box.value = mid              # manual sahəyə yaz: predict() bunu görəcək
+            return _handler
+
         with ui.grid(columns=3).classes('gap-4'):
             # Rəqəmsal: aralıq dropdown + manual input
-            for k, metaF in FIELDS.items():
+            for k_canon, metaF in FIELDS.items():
                 with ui.column():
                     ui.label(metaF['label']).classes('text-sm')
 
@@ -329,18 +315,10 @@ else:
                     ).props('outlined dense clearable')
                     ui.icon('info').classes('text-gray-500').tooltip(metaF['hint'])
 
+                    dd.on('update:model-value', on_dd_change_factory(k_canon, num))
 
-                    def on_dd_change(e, key=k, meta=metaF, box=num):
-                        mid = range_mid_any(e.value)  # string / tuple / list → orta
-                        box.value = mid
-
-
-
-                    dd.on('update:model-value', on_dd_change)
-
-
-                    inputs_bin[k] = dd
-                    inputs_num[k] = num
+                    inputs_bin[k_canon] = dd
+                    inputs_num[k_canon] = num
 
             # Kategoriyalar
             for k,(lab, options) in CATS.items():
@@ -348,23 +326,24 @@ else:
                     w = ui.select(options, label=lab, value=None, with_input=True).props('outlined dense use-input fill-input')
                 else:
                     w = ui.input(label=lab).props('outlined dense')
-                inputs_cat[k] = w
+                inputs_cat[KEYS.get(k, k)] = w
 
         # Presetlər + Clear
         def set_preset(kind):
             data = PRESETS[kind]
             for k2, v in data.items():
-                if k2 in inputs_num: inputs_num[k2].value = v
-                if k2 in inputs_cat and v in (CATS.get(k2, [None, []])[1] or []):
-                    inputs_cat[k2].value = v
+                kc = KEYS.get(k2, k2)
+                if kc in inputs_num: inputs_num[kc].value = v
+                if kc in inputs_cat and (CATS.get(kc, [None, []])[1] or []):
+                    if v in CATS.get(kc, [None, []])[1]:
+                        inputs_cat[kc].value = v
             for k2 in inputs_bin: inputs_bin[k2].value = None
             preset_info_box.set_content(PRESET_INFO.get(kind, ''))
-
 
         def clear_all():
             for c in inputs_num.values(): c.value = None
             for c in inputs_cat.values(): c.value = None
-            for c in inputs_bin.values(): c.value = None  # '—' yox, None!
+            for c in inputs_bin.values(): c.value = None
             preset_info_box.set_content('')
             res_title.set_text(''); res_sub.set_text(''); reason_box.set_text('')
             prob_chart.options['series'][0]['data'] = [0,0,0]; prob_chart.update()
@@ -374,9 +353,6 @@ else:
             cmp_chart.options['series'][2]['data'] = [None]*len(cmp_keys)
             cmp_chart.options['series'][3]['data'] = [None]*len(cmp_keys)
             cmp_chart.update()
-
-
-
 
         with ui.row().classes('gap-2 mt-2'):
             ui.button('Preset: Normal',    on_click=lambda: set_preset('Normal')).props('unelevated color=primary').classes('rounded-lg')
@@ -439,22 +415,19 @@ else:
         # “Niyə belə?” izahı
         reason_box = ui.label().classes('text-sm mt-2 text-gray-700')
 
-
         def safe_nonneg(v):
             try:
                 x = float(v)
-                return None if x < 0 else x  # <0 isə qrafikdə çəkməməyi seçirik
+                return None if x < 0 else x
             except Exception:
                 return None
         
         def update_charts(prob_list, row_vals):
-            # ehtimal bar (0..1 clamp)
+            # ehtimal bar
             probs = []
             for x in prob_list:
-                try:
-                    fx = float(x)
-                except Exception:
-                    fx = 0.0
+                try: fx = float(x)
+                except: fx = 0.0
                 probs.append(max(0.0, min(1.0, fx)))
             prob_chart.options['yAxis']['min'] = 0
             prob_chart.options['yAxis']['max'] = 1
@@ -468,7 +441,7 @@ else:
             radar_chart.update()
             radar_chart.visible = show_charts.value
         
-            # value vs midpoints (negativləri None elə ki, aşağı bar olmasın)
+            # value vs midpoints
             def midpoints_for(keys, bin_index):
                 mids = []
                 for k in keys:
@@ -495,7 +468,7 @@ else:
             values_now = [safe_nonneg(row_vals.get(k, None)) for k in cmp_keys]
         
             cmp_chart.options['xAxis']['data'] = [FIELDS[k]['label'] for k in cmp_keys]
-            cmp_chart.options['yAxis']['min'] = 0  # aşağı bar olmasın
+            cmp_chart.options['yAxis']['min'] = 0
             cmp_chart.options['series'][0]['data'] = values_now
             cmp_chart.options['series'][1]['data'] = normal_mids
             cmp_chart.options['series'][2]['data'] = carrier_mids
@@ -503,37 +476,41 @@ else:
             cmp_chart.update()
             cmp_chart.visible = show_charts.value
 
-
         def predict():
             # inputları topla: manual üstünlük, sonra dropdown orta
             row = {}
             filled_flags = []
-            for k, metaF in FIELDS.items():
-                manual = to_float_or_none(inputs_num[k].value)
+            for k_canon, metaF in FIELDS.items():
+                manual = to_float_or_none(inputs_num[k_canon].value)
                 if manual is None:
-                    mid = range_mid_any(inputs_bin[k].value)   # '10,40' / '10-40' / (10,40)
+                    mid = range_mid_any(inputs_bin[k_canon].value)   # '10,40' / '10-40' / (10,40)
                     val = to_float_or_none(mid)
                 else:
                     val = manual
-                # diapazon daxilinə snap et (yanlış 'out-of-range' bitsin)
                 val = snap_to_bounds(val, metaF['min'], metaF['max'])
-                row[k] = val
+                row[k_canon] = val
                 filled_flags.append(val is not None)
             
             for k in inputs_cat.keys():
                 v = inputs_cat[k].value
                 row[k] = v if v not in ('', None) else None
             
-            # Tam boş form → Normal preset-in dəyərləri
+            # Tam boş form → Normal preset
             if sum(filled_flags) == 0:
-                for k2, v2 in PRESETS['Normal'].items():
-                    if k2 in FIELDS:
-                        row[k2] = snap_to_bounds(v2, FIELDS[k2]['min'], FIELDS[k2]['max'])
+                for kk, vv in PRESETS['Normal'].items():
+                    if kk in FIELDS:
+                        row[kk] = snap_to_bounds(vv, FIELDS[kk]['min'], FIELDS[kk]['max'])
             
             # Qalan boşları normal-mid ilə doldur
             row = apply_defaults(row)
             
-            # Diapazon xəbərdarlığı (indi real hallarda çıxacaq)
+            # Diaqnostik bildiriş: override açarları real nədir?
+            ui.notification(
+                f"HbF={row.get('HbF')}, HB={row.get('HB')}, HbA2={row.get('HbA2')}, MCV={row.get('MCV')}",
+                type='info', close_button=True
+            )
+
+            # Diapazon xəbərdarlığı (real hallarda)
             msgs = out_of_range_msgs(row)
             if msgs:
                 ui.notification('Diapazondan kənar dəyərlər:\n' + '\n'.join(msgs), type='warning', close_button=True)
@@ -546,10 +523,10 @@ else:
             hbA2 = row.get('HbA2', None)
             mcv  = row.get('MCV', None)
             
-            filled_key_for_disease = sum(x is not None for x in [hbF, hb])
-            filled_key_for_carrier = sum(x is not None for x in [hbA2, mcv])
+            filled_key_for_disease = int(hbF is not None) + int(hb is not None)
+            filled_key_for_carrier = int(hbA2 is not None) + int(mcv is not None)
             
-            # 1) Xəstə override: HbF yüksək + Hb aşağı, HƏR İKİSİ real verilibsə
+            # 1) Xəstə override
             if filled_key_for_disease == 2 and (hbF >= 12.0) and (hb <= 10.5):
                 yhat = 2
                 p = [0.05, 0.10, 0.85]
@@ -559,17 +536,17 @@ else:
                 reason_box.set_text('Niyə belə? HbF yüksək (≥12%) və Hb aşağı (≤10.5) → Xəstə (override)')
                 return
             
-            # 2) Daşıyıcı override: HbA2 ≥ 3.8% və MCV ≤ 80, HƏR İKİSİ real verilibsə
+            # 2) Daşıyıcı override
             if filled_key_for_carrier == 2 and (hbA2 >= 3.8) and (mcv <= 80):
                 yhat = 1
                 p = [0.10, 0.80, 0.10]
                 res_title.set_text(f"Nəticə: {LABELS[yhat]}")
                 res_sub.set_text(f"Etibarlılıq: {max(p):.2%}")
                 update_charts(p, row)
-                reason_box.set_text('Niyə belə? HbA2 ≥ 3.8% və MCV ≤ 80 → Daşıyıcı (override)')
+                reason_box.set_text('Niyə belə? HbA2 ≥ 3.8% və MCV ≤ 80 fL → Daşıyıcı (override)')
                 return
             
-            # 3) Əks halda: model proqnozu
+            # 3) Model proqnozu
             yhat = int(model.predict(df)[0])
             proba = getattr(model, 'predict_proba', None)
             if proba:
@@ -587,11 +564,6 @@ else:
             
             reason_box.set_text('Niyə belə? ' + rule_based_explanation(row))
 
-
-
-
-
-
         ui.button('PROQNOZ', on_click=predict).props('unelevated color=primary size=lg').classes('mt-3 rounded-xl')
 
     # ---------------- Disclaimer ----------------
@@ -604,11 +576,3 @@ else:
 
 # ---------------- Run ----------------
 ui.run(host='0.0.0.0', port=PORT, reload=False, show=False)
-
-
-
-
-
-
-
-
