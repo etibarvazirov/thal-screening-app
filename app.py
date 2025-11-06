@@ -14,22 +14,29 @@ LABELS = {0: 'Normal', 1: 'Daşıyıcı', 2: 'Xəstə'}
 
 import re
 
-DASHES = ['–','—','-']  # en dash, em dash, hyphen
+DASHES = ['–','—','-']  # en/em/hyphen
 
 def parse_range_mid(text):
-    """'a–b' / 'a-b' / 'a — b' kimi mətnlərdən orta nöqtəni qaytarır."""
-    if not text or text.strip() in ('—', '-', '— —', '—–', '— — —', '—', '— —', '—  —'):
+    """'a–b' / 'a-b' kimi etiketi orta nöqtəyə çevirir; yoxdursa None."""
+    if not text or text.strip() == '—':
         return None
-    # bütün növ tireləri sadə '-' ilə əvəz et
     t = text
     for d in DASHES:
         t = t.replace(d, '-')
-    # iki ədəd tap
     nums = re.findall(r'[-+]?\d*\.?\d+', t)
     if len(nums) >= 2:
         a = float(nums[0]); b = float(nums[1])
-        return round((a+b)/2, 3)
+        return round((a + b) / 2, 6)
     return None
+
+def to_float_or_none(x):
+    """Manual+dropdown qarışıq dəyərləri təhlükəsiz float-a çevirir."""
+    if x is None or x == '':
+        return None
+    try:
+        return float(x)
+    except Exception:
+        return None
 
 
 # ---------------- Model yüklə / lazım olsa serverdə bir dəfə öyrət ----------------
@@ -170,13 +177,20 @@ def rule_based_explanation(row: dict) -> str:
 
 def out_of_range_msgs(row: dict):
     msgs = []
+    EPS = 1e-9
     for k, meta in FIELDS.items():
         v = row.get(k, None)
-        if v is None or (isinstance(v, float) and np.isnan(v)):
+        if v is None:
+            continue  # boş sahələrə xəbərdarlıq etmə
+        try:
+            vf = float(v)
+        except Exception:
             continue
-        if v < meta['min'] or v > meta['max']:
-            msgs.append(f"{meta['label']}: {v}  ({meta['min']}–{meta['max']})")
+        # Float yuvarlaqlaşma səhvlərinə elastik davran
+        if (vf + EPS) < meta['min'] or (vf - EPS) > meta['max']:
+            msgs.append(f"{meta['label']}: {vf}  ({meta['min']}–{meta['max']})")
     return msgs
+
 
 def detect_model_meta(model, meta):
     name = meta.get('model_name')
@@ -254,6 +268,7 @@ else:
 
                     options = ['—'] + [f"{a}-{b}" for a,b in metaF['bins']]
 
+
                     dd = ui.select(options, value='—').props('outlined dense')
                     num = ui.number(
                         label=f"Manual dəyər ( {metaF['min']}–{metaF['max']} )",
@@ -263,8 +278,8 @@ else:
 
                     def on_dd_change(e, key=k, meta=metaF, box=num):
                         mid = parse_range_mid(e.value)
-                        if mid is not None:
-                            box.value = mid
+                        box.value = mid  # mid None olarsa sahə boşalır (normaldır)
+
                     dd.on('update:model-value', on_dd_change)
 
                     inputs_bin[k] = dd
@@ -289,10 +304,30 @@ else:
             preset_info_box.set_content(PRESET_INFO.get(kind, ''))
 
         def clear_all():
+            # form
             for c in inputs_num.values(): c.value = None
             for c in inputs_cat.values(): c.value = None
             for c in inputs_bin.values(): c.value = '—'
             preset_info_box.set_content('')
+        
+            # nəticə mətni
+            res_title.set_text('')
+            res_sub.set_text('')
+            reason_box.set_text('')
+        
+            # qrafikləri sıfırla və gizlət (istəsən görünən də qala bilər)
+            prob_chart.options['series'][0]['data'] = [0, 0, 0]
+            prob_chart.update()
+        
+            radar_chart.options['series'][0]['data'][0]['value'] = [0]*len(radar_keys)
+            radar_chart.update()
+        
+            cmp_chart.options['series'][0]['data'] = [None]*len(cmp_keys)
+            cmp_chart.options['series'][1]['data'] = [None]*len(cmp_keys)
+            cmp_chart.options['series'][2]['data'] = [None]*len(cmp_keys)
+            cmp_chart.options['series'][3]['data'] = [None]*len(cmp_keys)
+            cmp_chart.update()
+
 
         with ui.row().classes('gap-2 mt-2'):
             ui.button('Preset: Normal',    on_click=lambda: set_preset('Normal')).props('unelevated color=primary').classes('rounded-lg')
@@ -355,43 +390,63 @@ else:
         # “Niyə belə?” izahı
         reason_box = ui.label().classes('text-sm mt-2 text-gray-700')
 
+
+        def safe_nonneg(v):
+            try:
+                x = float(v)
+                return None if x < 0 else x  # <0 isə qrafikdə çəkməməyi seçirik
+            except Exception:
+                return None
+        
         def update_charts(prob_list, row_vals):
-            # ehtimal bar
-            prob_chart.options['series'][0]['data'] = prob_list
+            # ehtimal bar (0..1 clamp)
+            probs = []
+            for x in prob_list:
+                try:
+                    fx = float(x)
+                except Exception:
+                    fx = 0.0
+                probs.append(max(0.0, min(1.0, fx)))
+            prob_chart.options['yAxis']['min'] = 0
+            prob_chart.options['yAxis']['max'] = 1
+            prob_chart.options['series'][0]['data'] = probs
             prob_chart.update()
             prob_chart.visible = show_charts.value
-
+        
             # radar
-            radar_vals = [row_vals.get(k, 0) or 0 for k in radar_keys]
+            radar_vals = [to_float_or_none(row_vals.get(k, None)) or 0.0 for k in radar_keys]
             radar_chart.options['series'][0]['data'][0]['value'] = radar_vals
             radar_chart.update()
             radar_chart.visible = show_charts.value
-
-            # müqayisə: normal/daşıyıcı/xəstə orta (bins orta nöqtələri)
+        
+            # value vs midpoints (negativləri None elə ki, aşağı bar olmasın)
             def midpoints_for(keys, bin_index):
                 mids = []
                 for k in keys:
-                    a,b = FIELDS[k]['bins'][bin_index]
-                    mids.append(round((a+b)/2,3))
+                    a, b = FIELDS[k]['bins'][bin_index]
+                    mids.append(round((a + b) / 2, 6))
                 return mids
-            # referenslər (sadə heuristika)
+        
             normal_mids  = midpoints_for(cmp_keys, 1)
             carrier_mids, disease_mids = [], []
             for k in cmp_keys:
                 if k == 'HbA2':
-                    carrier_mids.append(round(sum(FIELDS[k]['bins'][2])/2,3))
-                    disease_mids.append(round(sum(FIELDS[k]['bins'][1])/2,3))  # HbA2 xəstədə tipik marker deyil
+                    carrier_mids.append(round(sum(FIELDS[k]['bins'][2]) / 2, 6))
+                    disease_mids.append(round(sum(FIELDS[k]['bins'][1]) / 2, 6))
                 elif k == 'HbF':
-                    carrier_mids.append(round(sum(FIELDS[k]['bins'][1])/2,3))
-                    disease_mids.append(round(sum(FIELDS[k]['bins'][2])/2,3))
+                    carrier_mids.append(round(sum(FIELDS[k]['bins'][1]) / 2, 6))
+                    disease_mids.append(round(sum(FIELDS[k]['bins'][2]) / 2, 6))
                 elif k in ['MCV','MCH']:
-                    carrier_mids.append(round(sum(FIELDS[k]['bins'][1])/2,3))
-                    disease_mids.append(round(sum(FIELDS[k]['bins'][0])/2,3))
+                    carrier_mids.append(round(sum(FIELDS[k]['bins'][1]) / 2, 6))
+                    disease_mids.append(round(sum(FIELDS[k]['bins'][0]) / 2, 6))
                 else:  # RDWcv
-                    carrier_mids.append(round(sum(FIELDS[k]['bins'][1])/2,3))
-                    disease_mids.append(round(sum(FIELDS[k]['bins'][2])/2,3))
-
-            values_now = [row_vals.get(k, 0) or 0 for k in cmp_keys]
+                    carrier_mids.append(round(sum(FIELDS[k]['bins'][1]) / 2, 6))
+                    disease_mids.append(round(sum(FIELDS[k]['bins'][2]) / 2, 6))
+        
+            values_now = [safe_nonneg(row_vals.get(k, None)) for k in cmp_keys]
+        
+            cmp_chart.options['xAxis']['data'] = [FIELDS[k]['label'] for k in cmp_keys]
+            cmp_chart.options['yAxis']['min'] = 0  # aşağı bar olmasın
             cmp_chart.options['series'][0]['data'] = values_now
             cmp_chart.options['series'][1]['data'] = normal_mids
             cmp_chart.options['series'][2]['data'] = carrier_mids
@@ -399,15 +454,15 @@ else:
             cmp_chart.update()
             cmp_chart.visible = show_charts.value
 
+
         def predict():
-            # inputları topla
-            # inputları topla (manual üstünlük, yoxdursa dropdown-ın orta nöqtəsi)
+            # inputları topla (manual üstünlük, sonra dropdown orta nöqtəsi)
             row = {}
             for k in FIELDS.keys():
-                manual = inputs_num[k].value
-                if manual is None or manual == '':
-                    bin_sel = inputs_bin[k].value
-                    row[k] = parse_range_mid(bin_sel)
+                manual = to_float_or_none(inputs_num[k].value)
+                if manual is None:
+                    mid = parse_range_mid(inputs_bin[k].value)
+                    row[k] = to_float_or_none(mid)
                 else:
                     row[k] = manual
             
@@ -416,7 +471,6 @@ else:
                 row[k] = v if v not in ('', None) else None
             
             df = pd.DataFrame([row])
-
 
             # diapazon xəbərdarlığı
             msgs = out_of_range_msgs(row)
@@ -484,6 +538,7 @@ else:
 
 # ---------------- Run ----------------
 ui.run(host='0.0.0.0', port=PORT, reload=False, show=False)
+
 
 
 
