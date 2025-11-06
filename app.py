@@ -16,7 +16,9 @@ import re
 
 DASHES = ['–','—','-']  # en/em/hyphen
 
-FILL_DEFAULTS_MODE = 'min'  # alternativ: 'normal_mid'
+# Default doldurma rejimi: 'normal_mid' (neytral) — min artıq istəmirik
+FILL_DEFAULTS_MODE = 'normal_mid'   # alternativ: 'min'
+MIN_FIELDS_FOR_OVERRIDE = 2         # klinik override üçün tələb olunan dolu açar sahələrin sayı
 
 def to_float_or_none(x):
     if x is None or x == '': return None
@@ -33,12 +35,12 @@ def range_mid(v):
         return None
 
 def apply_defaults(row):
-    """Boş rəqəmsal sahələri default ilə doldur: min və ya normal mid."""
+    """Boş rəqəmsal sahələri default ilə doldur: normal mid (neytral)."""
     for k, meta in FIELDS.items():
         if row.get(k) is None:
             if FILL_DEFAULTS_MODE == 'min':
                 row[k] = float(meta['min'])
-            else:  # 'normal_mid' -> bins[1] orta
+            else:  # 'normal_mid'
                 a,b = meta['bins'][1]
                 row[k] = round((a+b)/2, 6)
     return row
@@ -48,7 +50,7 @@ def out_of_range_msgs(row):
     EPS = 1e-9
     for k, meta in FIELDS.items():
         v = row.get(k, None)
-        if v is None:  # defaults sonra gələcək, burada skip
+        if v is None:
             continue
         try:
             vf = float(v)
@@ -57,6 +59,7 @@ def out_of_range_msgs(row):
         if (vf + EPS) < meta['min'] or (vf - EPS) > meta['max']:
             msgs.append(f"{meta['label']}: {vf}  ({meta['min']}–{meta['max']})")
     return msgs
+
 
 
 def parse_range_mid(text):
@@ -312,7 +315,7 @@ else:
                     # label -> value (value: None və ya (a,b))
                     range_options = {'—': None}
                     for a,b in metaF['bins']:
-                        label = f"{a}-{b}"        # sadə '-' yazırıq ki, unicode tire problemi olmasın
+                        label = f"{a}-{b}"
                         range_options[label] = (a,b)
                     dd = ui.select(range_options, value=None).props('outlined dense')
 
@@ -327,8 +330,6 @@ else:
                         box.value = mid
                     dd.on('update:model-value', on_dd_change)
 
-
-                    dd.on('update:model-value', on_dd_change)
 
                     inputs_bin[k] = dd
                     inputs_num[k] = num
@@ -496,27 +497,37 @@ else:
         def predict():
             # inputları topla: manual üstünlük, sonra dropdown orta nöqtə
             row = {}
+            filled_flags = []
             for k in FIELDS.keys():
                 manual = to_float_or_none(inputs_num[k].value)
                 if manual is None:
-                    mid = range_mid(inputs_bin[k].value)  # None və ya orta nöqtə
-                    row[k] = to_float_or_none(mid)
+                    mid = range_mid(inputs_bin[k].value)  # None və ya orta
+                    val = to_float_or_none(mid)
                 else:
-                    row[k] = manual
+                    val = manual
+                row[k] = val
+                filled_flags.append(val is not None)
             
             for k in inputs_cat.keys():
                 v = inputs_cat[k].value
                 row[k] = v if v not in ('', None) else None
             
-            # boş rəqəmsallara DEFAULT doldur (sənin istəyinlə: minimal dəyər)
+            # 1) Əgər BÜTÜN rəqəmsal sahələr boşdursa → avtomatik Normal preset
+            if sum(filled_flags) == 0:
+                for k2, v2 in PRESETS['Normal'].items():
+                    if k2 in FIELDS:
+                        row[k2] = v2
+            
+            # 2) Qalan boşları NORMAL MID ilə doldur (neytral)
             row = apply_defaults(row)
             
-            # indi xəbərdarlığı et (artıq yalnış flag almamalıdır)
+            # indi xəbərdarlığı et (yalnız həqiqi kənarlara)
             msgs = out_of_range_msgs(row)
             if msgs:
                 ui.notification('Diapazondan kənar dəyərlər:\n' + '\n'.join(msgs), type='warning', close_button=True)
             
             df = pd.DataFrame([row])
+
 
 
             # diapazon xəbərdarlığı
@@ -530,45 +541,56 @@ else:
             
             # proqnoz (model) + klinik qayda (override)
             row_vals = {k: df.iloc[0].get(k, None) for k in df.columns}
-            hbA2 = row_vals.get('HbA2', None)
-            mcv  = row_vals.get('MCV', None)
-            hb   = row_vals.get('HB', None)
-            hbf  = row_vals.get('HbF', None)
             
-            # 1) Əvvəl xəstə üçün sərt qayda (HbF çox yüksək + Hb aşağı)
-            if (hbf is not None and hbf >= 12.0) and (hb is not None and hb <= 10.5):
+            hbA2 = row.get('HbA2', None)
+            mcv  = row.get('MCV', None)
+            hb   = row.get('HB', None)
+            hbf  = row.get('HbF', None)
+            
+            # neçə açar siqnal sahəsi həqiqətən verilib?
+            filled_key_for_disease = sum(x is not None for x in [hbf, hb])
+            filled_key_for_carrier = sum(x is not None for x in [hbA2, mcv])
+            
+            applied_rules = []
+            
+            # 1) Xəstə override yalnız HBF və HB HƏQİQƏTƏN verilibsə
+            if filled_key_for_disease == 2 and (hbf >= 12.0) and (hb <= 10.5):
                 yhat = 2
-                p = [0.05, 0.10, 0.85]  # vizual üçün ehtimal bölgüsü
+                p = [0.05, 0.10, 0.85]
                 res_title.set_text(f"Nəticə: {LABELS[yhat]}")
                 res_sub.set_text(f"Etibarlılıq: {max(p):.2%}")
-                update_charts(p, row_vals)
+                update_charts(p, row)
                 reason_box.set_text('Niyə belə? HbF yüksək və Hb aşağı → Xəstə (override)')
+                return  # <- bu proqnozu artıq qaytardıq
+            
+            # 2) Daşıyıcı override yalnız HbA2 və MCV verilibsə
+            if filled_key_for_carrier == 2 and (hbA2 >= 3.8) and (mcv <= 80):
+                yhat = 1
+                p = [0.10, 0.80, 0.10]
+                res_title.set_text(f"Nəticə: {LABELS[yhat]}")
+                res_sub.set_text(f"Etibarlılıq: {max(p):.2%}")
+                update_charts(p, row)
+                reason_box.set_text('Niyə belə? HbA2 ≥ 3.8% və MCV ≤ 80 → Daşıyıcı (override)')
+                return
+            
+            # 3) Əks halda modelə burax
+            yhat = int(model.predict(df)[0])
+            proba = getattr(model, 'predict_proba', None)
+            if proba:
+                p = proba(df)[0].astype(float)
+                p = np.clip(p, 1e-6, None); p = (p / p.sum()).tolist()
+                res_title.set_text(f"Nəticə: {LABELS[int(np.argmax(p))]}")
+                res_sub.set_text(f"Etibarlılıq: {max(p):.2%}")
+                update_charts(p, row)
             else:
-                # 2) Daşıyıcı üçün SƏRT qayda: HbA2 ≥ 3.8% və MCV ≤ 80 → DAŞIYICI
-                if (hbA2 is not None and hbA2 >= 3.8) and (mcv is not None and mcv <= 80):
-                    yhat = 1
-                    p = [0.10, 0.80, 0.10]  # vizual üçün ehtimal bölgüsü
-                    res_title.set_text(f"Nəticə: {LABELS[yhat]}")
-                    res_sub.set_text(f"Etibarlılıq: {max(p):.2%}")
-                    update_charts(p, row_vals)
-                    reason_box.set_text('Niyə belə? HbA2 ≥ 3.8% və MCV ≤ 80 → Daşıyıcı (override)')
-                else:
-                    # 3) Heç biri deyilsə, modelə burax
-                    yhat = int(model.predict(df)[0])
-                    proba = getattr(model, 'predict_proba', None)
-                    if proba:
-                        p = proba(df)[0].astype(float)
-                        p = np.clip(p, 1e-6, None); p = (p / p.sum()).tolist()
-                        res_title.set_text(f"Nəticə: {LABELS[int(np.argmax(p))]}")
-                        res_sub.set_text(f"Etibarlılıq: {max(p):.2%}")
-                        update_charts(p, row_vals)
-                    else:
-                        res_title.set_text(f"Nəticə: {LABELS[yhat]}")
-                        res_sub.set_text('')
-                        prob_chart.visible = False
-                        radar_chart.visible = False
-                        cmp_chart.visible = False
-                    reason_box.set_text('Niyə belə? ' + rule_based_explanation(row_vals))
+                res_title.set_text(f"Nəticə: {LABELS[yhat]}")
+                res_sub.set_text('')
+                prob_chart.visible = False
+                radar_chart.visible = False
+                cmp_chart.visible = False
+            
+            reason_box.set_text('Niyə belə? ' + rule_based_explanation(row))
+
 
 
 
@@ -585,6 +607,7 @@ else:
 
 # ---------------- Run ----------------
 ui.run(host='0.0.0.0', port=PORT, reload=False, show=False)
+
 
 
 
