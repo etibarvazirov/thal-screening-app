@@ -79,6 +79,8 @@ else:
 
         ui.button('Predict', on_click=predict).props('unelevated color=primary').classes('mt-2')
 
-ui.run(host='0.0.0.0', port=PORT, reload=False, show=False)
+ui.run(host='0.0.0.0', port=PORT, reload=False, show=False, workers=1)
+
+
 
 
