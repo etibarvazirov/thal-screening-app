@@ -1,35 +1,41 @@
 # app.py (defensive)
 
-import os, sys, subprocess, joblib
+import os, sys, subprocess, joblib, pandas as pd
 import pandas as pd
 from nicegui import ui
 
-import os
-os.environ.setdefault("WEB_CONCURRENCY", "1")
 
+os.environ.setdefault("WEB_CONCURRENCY", "1")
 PORT = int(os.environ.get('PORT', 8080))
 MODEL_PATH = 'artifacts/model.pkl'
 LABELS = {0: 'Normal', 1: 'Carrier', 2: 'Disease'}
 
-def try_load_model():
-    try:
-        if os.path.exists(MODEL_PATH):
+def load_or_train_model():
+    # 1) Var olan modeli yüklə
+    if os.path.exists(MODEL_PATH):
+        try:
             bundle = joblib.load(MODEL_PATH)
             return bundle['model'], None
-        else:
-            if os.path.exists('data/HPLC data.csv'):
-                try:
-                    os.makedirs('artifacts', exist_ok=True)
-                    subprocess.check_call([sys.executable, 'train.py'])
-                    bundle = joblib.load(MODEL_PATH)
-                    return bundle['model'], None
-                except Exception as e:
-                    return None, f"Training failed on server: {e}"
-            return None, "Model not found and no dataset to train on."
-    except Exception as e:
-        return None, f"Model load error: {e}"
+        except Exception as e:
+            # Yüklənmə alınmadısa, sil və təzədən train
+            try:
+                os.remove(MODEL_PATH)
+            except Exception:
+                pass
+    # 2) Dataset varsa serverdə bir dəfə train et
+    if os.path.exists('data/HPLC data.csv'):
+        try:
+            os.makedirs('artifacts', exist_ok=True)
+            subprocess.check_call([sys.executable, 'train.py'])
+            bundle = joblib.load(MODEL_PATH)
+            return bundle['model'], None
+        except Exception as e:
+            return None, f"Training failed: {e}"
+    # 3) Heç nə yoxdursa, istifadəçiyə mesaj
+    return None, "Model not found and dataset missing (commit artifacts/model.pkl or data/HPLC data.csv)."
 
-model, err = try_load_model()
+model, err = load_or_train_model()
+
 
 with ui.header().classes('items-center justify-between'):
     ui.label('HPLC-based Thalassemia Screening').classes('text-2xl font-bold')
@@ -80,6 +86,7 @@ else:
         ui.button('Predict', on_click=predict).props('unelevated color=primary').classes('mt-2')
 
 ui.run(host='0.0.0.0', port=PORT, reload=False, show=False, workers=1)
+
 
 
 
