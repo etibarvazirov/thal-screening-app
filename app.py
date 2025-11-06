@@ -20,6 +20,29 @@ DASHES = ['–','—','-']  # en/em/hyphen
 FILL_DEFAULTS_MODE = 'normal_mid'   # alternativ: 'min'
 MIN_FIELDS_FOR_OVERRIDE = 2         # klinik override üçün tələb olunan dolu açar sahələrin sayı
 
+
+def range_mid_any(v):
+    """Dropdown dəyəri string ('a-b' və ya 'a–b') və ya tuple/list (a,b) ola bilər."""
+    if v is None:
+        return None
+    # tuple/list: (a,b)
+    if isinstance(v, (tuple, list)) and len(v) == 2:
+        try:
+            a, b = float(v[0]), float(v[1])
+            return round((a + b) / 2, 6)
+        except Exception:
+            return None
+    # string: 'a-b' və ya 'a–b' / 'a — b'
+    if isinstance(v, str):
+        t = v.replace('–', '-').replace('—', '-')
+        nums = re.findall(r'[-+]?\d*\.?\d+', t)
+        if len(nums) >= 2:
+            a, b = float(nums[0]), float(nums[1])
+            return round((a + b) / 2, 6)
+        return None
+    return None
+
+
 def to_float_or_none(x):
     if x is None or x == '': return None
     try: return float(x)
@@ -325,9 +348,12 @@ else:
                     ).props('outlined dense clearable')
                     ui.icon('info').classes('text-gray-500').tooltip(metaF['hint'])
 
+
                     def on_dd_change(e, key=k, meta=metaF, box=num):
-                        mid = range_mid(e.value)  # e.value artıq None və ya (a,b)-dir
+                        mid = range_mid_any(e.value)  # string və ya (a,b) ola bilər
                         box.value = mid
+
+
                     dd.on('update:model-value', on_dd_change)
 
 
@@ -501,8 +527,9 @@ else:
             for k in FIELDS.keys():
                 manual = to_float_or_none(inputs_num[k].value)
                 if manual is None:
-                    mid = range_mid(inputs_bin[k].value)  # None və ya orta
+                    mid = range_mid_any(inputs_bin[k].value)  # string və ya (a,b) → orta
                     val = to_float_or_none(mid)
+
                 else:
                     val = manual
                 row[k] = val
@@ -607,6 +634,7 @@ else:
 
 # ---------------- Run ----------------
 ui.run(host='0.0.0.0', port=PORT, reload=False, show=False)
+
 
 
 
