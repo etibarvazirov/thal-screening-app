@@ -1,5 +1,5 @@
 # app.py — HPLC-based Thalassemia Screening (NiceGUI, AZ/EN, range dropdowns, charts)
-import os, sys, subprocess, io, joblib
+import os, sys, subprocess, joblib
 import pandas as pd
 import numpy as np
 from nicegui import ui
@@ -42,7 +42,7 @@ TXT = {
         'disclaimer': 'Məsuliyyət qeydi / Məhdudiyyətlər',
         'disc_text': (
             "- Bu alət **tədqiqat və tədris** məqsədlidir; klinik qərar üçün uyğun deyil.\n"
-            "- Dəyərlər laborator laboratoriyadan asılı dəyişə bilər; şübhədə qalanda **həkim qərarı** əsasdır.\n"
+            "- Dəyərlər laboratoriyadan asılı dəyişə bilər; şübhədə qalanda **həkim qərarı** əsasdır.\n"
             "- “Niyə belə?” bölməsi sadə qaydalarla izah verir; modelin daxili mexanizmini əvəz etmir."
         ),
     },
@@ -121,7 +121,7 @@ FIELDS = {
               'bins': [(10,13),(13,16),(16,25)], 'hints': {'az':'Eritrosit ölçü dəyişkənliyi','en':'Red cell size variation'}},
     'S_Window': {'label': {'az':'S-Window (HPLC)','en':'S-Window (HPLC)'}, 'min':0,'max':5,'step':0.1,
                  'bins': [(0,0.5),(0.5,1.5),(1.5,5)], 'hints': {'az':'Opsional siqnal','en':'Optional signal'}},
-    'Unknown':  {'label': {'az':'Unknown (HPLC)','en':'Unknown (HPLC)'}, 'min':0,'max':5,'step':0.1,
+    'Unknown':  {'label': {'az':'Unknown (HPLC)','en':'Unknown (HPLC)'},  'min':0,'max':5,'step':0.1,
                  'bins': [(0,0.5),(0.5,1.5),(1.5,5)], 'hints': {'az':'Opsional','en':'Optional'}},
     'Age':      {'label': {'az':'Yaş (il)','en':'Age (years)'}, 'min':0,'max':100,'step':1,
                  'bins': [(0,12),(12,40),(40,100)], 'hints': {'az':'Opsional','en':'Optional'}},
@@ -164,12 +164,11 @@ def out_of_range_msgs(row):
 
 # ------------- header (language) -------------
 with ui.header().classes('items-center justify-between bg-blue-600 text-white'):
-    ui.label(lambda: t('title')).classes('text-2xl font-bold')
+    ui.label(t('title')).classes('text-2xl font-bold')
     with ui.row().classes('items-center'):
         ui.label('AZ / EN')
         def set_lang(v):
             LANG['value'] = v
-            # sadə yol: tüm mətni yeniləmək üçün reload
             ui.run_javascript('location.reload()')
         ui.toggle({'az':'AZ','en':'EN'}, value='az', on_change=lambda e: set_lang(e.value)).props('color=white')
 
@@ -195,22 +194,22 @@ def detect_model_meta(model, meta):
 
 if err:
     with ui.card().classes('max-w-3xl mx-auto mt-10'):
-        ui.label(lambda: t('cannot_start')).classes('text-xl font-semibold text-red-600')
+        ui.label(t('cannot_start')).classes('text-xl font-semibold text-red-600')
         ui.label(err).classes('text-red-600')
-        ui.label(lambda: t('fix')).classes('text-gray-700')
+        ui.label(t('fix')).classes('text-gray-700')
 else:
     model_name, skver, calibrated = detect_model_meta(model, meta)
 
     with ui.card().classes('max-w-5xl mx-auto mt-6'):
-        ui.label(lambda: t('model_info')).classes('text-lg font-medium')
+        ui.label(t('model_info')).classes('text-lg font-medium')
         with ui.grid(columns=3).classes('gap-4'):
-            ui.label(lambda: f"{t('model_name')}: {model_name}")
-            ui.label(lambda: f"{t('sk_version')}: {skver}")
-            ui.label(lambda: f"{t('calibrated')}: {t('yes') if calibrated else t('no')}")
+            ui.label(f"{t('model_name')}: {model_name}")
+            ui.label(f"{t('sk_version')}: {skver}")
+            ui.label(f"{t('calibrated')}: {t('yes') if calibrated else t('no')}")
 
     # ------------- inputs card -------------
     with ui.card().classes('max-w-5xl mx-auto mt-4'):
-        ui.label(lambda: t('enter')).classes('text-lg font-medium mb-2')
+        ui.label(t('enter')).classes('text-lg font-medium mb-2')
 
         inputs_num = {}
         inputs_bin = {}
@@ -226,12 +225,11 @@ else:
                     dd = ui.select(options, value='—').props('outlined dense')
                     # manual input
                     num = ui.number(
-                        label=lambda: f"{t('manual')} ( {metaF['min']}–{metaF['max']} )",
+                        label=f"{t('manual')} ( {metaF['min']}–{metaF['max']} )",
                         min=metaF['min'], max=metaF['max'], step=metaF['step'], value=None
                     ).props('outlined dense clearable')
                     ui.icon('info').classes('text-gray-500').tooltip(hint_for(k))
 
-                    # when dropdown changes → fill midpoint to manual box
                     def on_dd_change(e, key=k, meta=metaF, box=num):
                         val = e.value
                         if val and '–' in val:
@@ -261,12 +259,11 @@ else:
                 'Disease': {'HbA0':80,'HbA2':2.0,'HbF':8.0,'RBC':5.2,'HB':9.5,'MCV':68,'MCH':22,'MCHC':31,'RDWcv':18,'S_Window':1,'Unknown':0.5,'Age':10,'Gender':'M','Weekness':'Yes','Jaundice':'Yes'},
             }
             data = presets[kind]
-            for k,v in data.items():
-                if k in inputs_num: inputs_num[k].value = v
-                if k in inputs_cat and v in (CATS.get(k,[None,[]])[1] or []):
-                    inputs_cat[k].value = v
-            # dropdown-ları sıfırla
-            for k in inputs_bin: inputs_bin[k].value = '—'
+            for k2,v in data.items():
+                if k2 in inputs_num: inputs_num[k2].value = v
+                if k2 in inputs_cat and v in (CATS.get(k2,[None,[]])[1] or []):
+                    inputs_cat[k2].value = v
+            for k2 in inputs_bin: inputs_bin[k2].value = '—'
 
         def clear_all():
             for c in inputs_num.values(): c.value = None
@@ -274,13 +271,13 @@ else:
             for c in inputs_bin.values(): c.value = '—'
 
         with ui.row().classes('gap-2 mt-2'):
-            ui.button(lambda: t('preset_normal'),  on_click=lambda: set_preset('Normal')).props('flat color=primary')
-            ui.button(lambda: t('preset_carrier'), on_click=lambda: set_preset('Carrier')).props('flat color=primary')
-            ui.button(lambda: t('preset_disease'), on_click=lambda: set_preset('Disease')).props('flat color=primary')
-            ui.button(lambda: t('clear'), on_click=clear_all).props('flat')
+            ui.button(t('preset_normal'),  on_click=lambda: set_preset('Normal')).props('flat color=primary')
+            ui.button(t('preset_carrier'), on_click=lambda: set_preset('Carrier')).props('flat color=primary')
+            ui.button(t('preset_disease'), on_click=lambda: set_preset('Disease')).props('flat color=primary')
+            ui.button(t('clear'), on_click=clear_all).props('flat')
 
         # charts toggle
-        show_charts = ui.checkbox(lambda: t('charts_toggle'), value=True)
+        show_charts = ui.checkbox(t('charts_toggle'), value=True)
 
         # results
         res_title = ui.label().classes('text-xl font-semibold mt-4')
@@ -299,7 +296,6 @@ else:
         reason_box = ui.label().classes('text-sm mt-2')
 
         def predict():
-            # prefer manual if given, else take midpoint from dropdown (already filled)
             row = {}
             for k in FIELDS.keys():
                 v = inputs_num[k].value
@@ -309,7 +305,6 @@ else:
 
             df = pd.DataFrame([row])
 
-            # range warning
             msgs = out_of_range_msgs(row)
             if msgs:
                 ui.notification(t('range_warn') + '\n' + '\n'.join(msgs), type='warning', close_button=True)
@@ -328,11 +323,10 @@ else:
 
             reason_box.set_text(f"{t('why')}: " + rule_based_explanation(row))
 
-        ui.button(lambda: t('predict'), on_click=predict).props('unelevated color=primary').classes('mt-3')
+        ui.button(t('predict'), on_click=predict).props('unelevated color=primary').classes('mt-3')
 
     # disclaimer
-    with ui.expansion(lambda: t('disclaimer')).classes('max-w-5xl mx-auto mt-4'):
+    with ui.expansion(t('disclaimer')).classes('max-w-5xl mx-auto mt-4'):
         ui.markdown(t('disc_text'))
 
 ui.run(host='0.0.0.0', port=PORT, reload=False, show=False)
-
