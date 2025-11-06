@@ -2,7 +2,8 @@ nicegui
 uvicorn
 pandas
 numpy
-scikit-learn
-imbalanced-learn
+scikit-learn==1.7.2
+imbalanced-learn==0.13.0
 joblib
+
 
