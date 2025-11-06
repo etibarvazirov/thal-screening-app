@@ -4,6 +4,24 @@ import pandas as pd
 import numpy as np
 from nicegui import ui
 
+ui.add_head_html("""
+<style>
+  body { background: #f6f7fb; }
+  .app-card { border-radius: 16px; box-shadow: 0 10px 24px rgba(23,43,77,0.07); }
+  .app-header { 
+    background: linear-gradient(90deg, #2563eb 0%, #4f46e5 50%, #7c3aed 100%);
+  }
+  .section-title { font-weight: 700; font-size: 1.1rem; color: #1f2937; }
+  .muted { color: #6b7280; }
+  .chip { 
+    display:inline-flex; align-items:center; gap:.4rem; 
+    background:#eef2ff; color:#3730a3; padding:.25rem .6rem; 
+    border-radius:999px; font-size:.85rem;
+  }
+</style>
+""")
+
+
 # Heroku uvicorn "workers" problemi üçün
 os.environ["WEB_CONCURRENCY"] = "1"
 
@@ -112,23 +130,36 @@ def detect_model_meta(model, meta):
     return name, skver, calibrated
 
 # ---------------- Başlıq / Hero ----------------
-with ui.header().classes('items-center justify-between bg-gradient-to-r from-blue-600 to-indigo-600 text-white'):
-    ui.label('HPLC əsaslı Talassemiya Skrininqi').classes('text-2xl font-bold')
-    ui.label('Demo • Klinik istifadə üçün deyil')
+with ui.header().classes('app-header text-white'):
+    with ui.row().classes('w-full items-center justify-between'):
+        with ui.column().classes('py-3'):
+            ui.label('Talassemiya Risk Proqnozu (HPLC göstəriciləri)').classes('text-2xl font-bold')
+            ui.label('Demo • Klinik istifadə üçün deyil').classes('opacity-80')
+        with ui.row().classes('items-center gap-2'):
+            ui.html('<span class="chip">HPLC</span>')
+            ui.html('<span class="chip">ML Model</span>')
+            ui.html('<span class="chip">Education/Research</span>')
+
 
 # ---------------- Yuxarı məlumat kartı (layihə + dəyişənlər) ----------------
-with ui.card().classes('max-w-6xl mx-auto mt-6 shadow-xl rounded-xl'):
-    ui.label('Layihə haqqında qısa məlumat').classes('text-lg font-semibold')
+with ui.card().classes('app-card max-w-6xl mx-auto mt-6'):
+    with ui.row().classes('items-center gap-2'):
+        ui.icon('analytics').classes('text-indigo-600')
+        ui.label('Layihə haqqında qısa məlumat').classes('section-title')
     ui.markdown(
-        "**Məqsəd:** HPLC və qan göstəricilərinə əsasən talassemiya statusunun (Normal / Carrier / Disease) proqnozlaşdırılması.\n\n"
+        "**Məqsəd:** HPLC və qan göstəricilərinə əsasən talassemiya statusunun "
+        "(Normal / Daşıyıcı / Xəstə) proqnozlaşdırılması.\n\n"
         "**Qeyd:** Bu alət tədqiqat və tədris məqsədlidir; klinik qərar üçün uyğun deyil."
-    ).classes('text-gray-700')
+    ).classes('muted')
     ui.separator()
-    ui.label('Göstəricilər və mənaları').classes('text-base font-medium mt-2')
+    with ui.row().classes('items-center gap-2 mt-2'):
+        ui.icon('science').classes('text-emerald-600')
+        ui.label('Göstəricilər və mənaları').classes('section-title')
     bullets = []
     for k, meta in FIELDS.items():
         bullets.append(f"- **{meta['label']}**: {meta['hint']}")
-    ui.markdown("\n".join(bullets)).classes('text-gray-700')
+    ui.markdown("\n".join(bullets)).classes('muted')
+
 
 # ---------------- Model status ----------------
 if err:
@@ -138,7 +169,7 @@ if err:
         ui.label('Həll: repoya artifacts/model.pkl yükləyin və ya data/HPLC data.csv əlavə edin ki, server bir dəfə öyrədə bilsin.').classes('text-gray-700')
 else:
     model_name, skver, calibrated = detect_model_meta(model, meta)
-    with ui.card().classes('max-w-6xl mx-auto mt-4 shadow-lg rounded-xl'):
+    with ui.card().classes('app-card max-w-6xl mx-auto mt-4 shadow-lg rounded-xl'):
         ui.label('Model məlumatları').classes('text-lg font-medium')
         with ui.grid(columns=3).classes('gap-4'):
             ui.label(f"Model: {model_name}")
@@ -146,7 +177,7 @@ else:
             ui.label(f"Kalibrasiya: {'Bəli' if calibrated else 'Xeyr'}")
 
     # ---------------- Giriş formu ----------------
-    with ui.card().classes('max-w-6xl mx-auto mt-4 shadow-lg rounded-xl'):
+    with ui.card().classes('app-card max-w-6xl mx-auto mt-4 shadow-lg rounded-xl'):
         ui.label('Biomarkerləri daxil et').classes('text-lg font-medium mb-2')
 
         inputs_num = {}
@@ -208,18 +239,27 @@ else:
             for c in inputs_bin.values(): c.value = '—'
 
         with ui.row().classes('gap-2 mt-2'):
-            ui.button('Preset: Normal',  on_click=lambda: set_preset('Normal')).props('flat color=primary')
-            ui.button('Preset: Daşıyıcı', on_click=lambda: set_preset('Carrier')).props('flat color=primary')
-            ui.button('Preset: Xəstə',    on_click=lambda: set_preset('Disease')).props('flat color=primary')
-            ui.button('Təmizlə', on_click=clear_all).props('flat')
+            # preset/clear buttons (mövcud kodun içində):
+            ui.button('Preset: Normal',  on_click=lambda: set_preset('Normal')).props('unelevated color=primary').classes('rounded-lg')
+            ui.button('Preset: Daşıyıcı', on_click=lambda: set_preset('Carrier')).props('unelevated color=primary').classes('rounded-lg')
+            ui.button('Preset: Xəstə',    on_click=lambda: set_preset('Disease')).props('unelevated color=primary').classes('rounded-lg')
+            ui.button('Təmizlə', on_click=clear_all).props('outline color=grey-7').classes('rounded-lg')
+
+
+
 
         # Qrafikləri göstər gizlət
         show_charts = ui.checkbox('Qrafikləri göstər', value=True)
 
         # Nəticə bölməsi
+
         with ui.element('div').classes('mt-4'):
+            with ui.row().classes('items-center gap-2'):
+                ui.icon('insights').classes('text-amber-600')
+                ui.label('Proqnoz və ehtimallar').classes('section-title')
             res_title = ui.label().classes('text-xl font-semibold')
-            res_sub   = ui.label().classes('text-sm text-gray-600')
+            res_sub   = ui.label().classes('text-sm muted')
+
 
         # 1) Sinif ehtimalları (bar)
         prob_chart = ui.echart({
@@ -340,7 +380,8 @@ else:
 
             reason_box.set_text('Niyə belə? ' + rule_based_explanation(row))
 
-        ui.button('PROQNOZ', on_click=predict).props('unelevated color=primary').classes('mt-3')
+        # PROQNOZ düyməsi:
+        ui.button('PROQNOZ', on_click=predict).props('unelevated color=primary size=lg').classes('mt-3 rounded-xl')
 
     # ---------------- Disclaimer ----------------
     with ui.expansion('Məsuliyyət qeydi / Məhdudiyyətlər').classes('max-w-6xl mx-auto mt-4'):
@@ -352,3 +393,4 @@ else:
 
 # ---------------- Run ----------------
 ui.run(host='0.0.0.0', port=PORT, reload=False, show=False)
+
