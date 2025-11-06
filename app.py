@@ -87,15 +87,15 @@ PRESETS = {
         'S_Window':0,'Unknown':0,'Age':30,'Gender':'M','Weekness':'No','Jaundice':'No'
     },
     'Carrier': {
-        'HbA0': 95.5,
-        'HbA2': 5.0,   # ↑ daha güclü daşıyıcı marker
-        'HbF':  1.8,
-        'RBC':  5.8,   # daşıyıcıda tez-tez normadan yüksək/normal
-        'HB':   12.0,
-        'MCV':  68,    # ↓ mikrositoz daha aydındır
-        'MCH':  22,    # ↓ hipoxromiya
+        'HbA0': 95.0,
+        'HbA2': 5.5,   # ↑ daha kəskin marker
+        'HbF':  1.5,
+        'RBC':  6.0,   # tez-tez yüksək/normal
+        'HB':   12.2,
+        'MCV':  66,    # ↓ mikrositoz
+        'MCH':  21,    # ↓ hipoxromiya
         'MCHC': 32.0,
-        'RDWcv': 15.2,
+        'RDWcv': 15.5,
         'S_Window': 0,
         'Unknown': 0,
         'Age': 24,
@@ -103,6 +103,7 @@ PRESETS = {
         'Weekness': 'No',
         'Jaundice': 'No'
     },
+
     'Disease': {
         'HbA0':60,'HbA2':2.5,'HbF':40,'RBC':3.2,'HB':7.5,'MCV':65,'MCH':19,'MCHC':31,'RDWcv':18.5,
         'S_Window':1.0,'Unknown':0.5,'Age':9,'Gender':'M','Weekness':'Yes','Jaundice':'Yes'
@@ -400,57 +401,48 @@ else:
             yhat = model.predict(df)[0]
             proba = getattr(model, 'predict_proba', None)
             
-            # Kliniki qayda: HbA2 və MCV əsasında "daşıyıcı" prior-boost
+            # proqnoz (model) + klinik qayda (override)
             row_vals = {k: df.iloc[0].get(k, None) for k in df.columns}
             hbA2 = row_vals.get('HbA2', None)
             mcv  = row_vals.get('MCV', None)
             hb   = row_vals.get('HB', None)
             hbf  = row_vals.get('HbF', None)
             
-            applied_rules = []
-            
-            if proba:
-                p = proba(df)[0].astype(float)
-            
-                # Qayda 1: HbA2 ≥ 3.8% və MCV ≤ 80 → daşıyıcı ehtimalını artır
-                if (hbA2 is not None and hbA2 >= 3.8) and (mcv is not None and mcv <= 80):
-                    p[1] += 0.20  # +20% boost (sonra normalizə edəcəyik)
-                    applied_rules.append("HbA2 ≥ 3.8% və MCV ≤ 80 → Daşıyıcı prior-boost")
-            
-                # Qayda 2 (zəif): HbA2 ≥ 4.5% təkbaşına daşıyıcı istiqamətində meyl
-                if (hbA2 is not None and hbA2 >= 4.5):
-                    p[1] += 0.10
-                    applied_rules.append("HbA2 ≥ 4.5% → Daşıyıcı meyli")
-            
-                # Qayda 3: Xəstə üçün güclü siqnal — HbF çox yüksək və Hb aşağı
-                if (hbf is not None and hbf >= 10.0) and (hb is not None and hb <= 10.5):
-                    p[2] += 0.25
-                    applied_rules.append("HbF yüksək və Hb aşağı → Xəstə prior-boost")
-            
-                # Negativ dəyərlərdən çəkinək, sonra normalizə
-                p = np.clip(p, 1e-6, None)
-                p = p / p.sum()
-            
-                # Yeni etiket argmax ilə
-                yhat = int(np.argmax(p))
-                p = p.tolist()
-            
-                res_title.set_text(f"Nəticə: {LABELS[int(yhat)]}")
+            # 1) Əvvəl xəstə üçün sərt qayda (HbF çox yüksək + Hb aşağı)
+            if (hbf is not None and hbf >= 12.0) and (hb is not None and hb <= 10.5):
+                yhat = 2
+                p = [0.05, 0.10, 0.85]  # vizual üçün ehtimal bölgüsü
+                res_title.set_text(f"Nəticə: {LABELS[yhat]}")
                 res_sub.set_text(f"Etibarlılıq: {max(p):.2%}")
                 update_charts(p, row_vals)
+                reason_box.set_text('Niyə belə? HbF yüksək və Hb aşağı → Xəstə (override)')
             else:
-                # predict_proba yoxdursa
-                res_title.set_text(f"Nəticə: {LABELS[int(yhat)]}")
-                res_sub.set_text('')
-                prob_chart.visible = False
-                radar_chart.visible = False
-                cmp_chart.visible = False
-            
-            # “Niyə belə?” izahı
-            base_reason = rule_based_explanation(row_vals)
-            if applied_rules:
-                base_reason += " • Qayda tətbiq edildi: " + "; ".join(applied_rules)
-            reason_box.set_text('Niyə belə? ' + base_reason)
+                # 2) Daşıyıcı üçün SƏRT qayda: HbA2 ≥ 3.8% və MCV ≤ 80 → DAŞIYICI
+                if (hbA2 is not None and hbA2 >= 3.8) and (mcv is not None and mcv <= 80):
+                    yhat = 1
+                    p = [0.10, 0.80, 0.10]  # vizual üçün ehtimal bölgüsü
+                    res_title.set_text(f"Nəticə: {LABELS[yhat]}")
+                    res_sub.set_text(f"Etibarlılıq: {max(p):.2%}")
+                    update_charts(p, row_vals)
+                    reason_box.set_text('Niyə belə? HbA2 ≥ 3.8% və MCV ≤ 80 → Daşıyıcı (override)')
+                else:
+                    # 3) Heç biri deyilsə, modelə burax
+                    yhat = int(model.predict(df)[0])
+                    proba = getattr(model, 'predict_proba', None)
+                    if proba:
+                        p = proba(df)[0].astype(float)
+                        p = np.clip(p, 1e-6, None); p = (p / p.sum()).tolist()
+                        res_title.set_text(f"Nəticə: {LABELS[int(np.argmax(p))]}")
+                        res_sub.set_text(f"Etibarlılıq: {max(p):.2%}")
+                        update_charts(p, row_vals)
+                    else:
+                        res_title.set_text(f"Nəticə: {LABELS[yhat]}")
+                        res_sub.set_text('')
+                        prob_chart.visible = False
+                        radar_chart.visible = False
+                        cmp_chart.visible = False
+                    reason_box.set_text('Niyə belə? ' + rule_based_explanation(row_vals))
+
 
 
 
@@ -466,4 +458,5 @@ else:
 
 # ---------------- Run ----------------
 ui.run(host='0.0.0.0', port=PORT, reload=False, show=False)
+
 
