@@ -302,20 +302,10 @@ else:
                 with ui.column():
                     ui.label(metaF['label']).classes('text-sm')
 
-                    # label -> value (value: None və ya (a,b))
-                    range_options = {'—': None}
-                    for a,b in metaF['bins']:
-                        label = f"{a}-{b}"
-                        range_options[label] = (a,b)
-                    dd = ui.select(range_options, value=None).props('outlined dense')
+                    range_labels = ['—'] + [f"{a}-{b}" for a,b in metaF['bins']]
+                    dd = ui.select(range_labels, value='—').props('outlined dense')
 
-                    num = ui.number(
-                        label=f"Manual dəyər ( {metaF['min']}–{metaF['max']} )",
-                        min=metaF['min'], max=metaF['max'], step=metaF['step'], value=None
-                    ).props('outlined dense clearable')
-                    ui.icon('info').classes('text-gray-500').tooltip(metaF['hint'])
 
-                    dd.on('update:model-value', on_dd_change_factory(k_canon, num))
 
                     inputs_bin[k_canon] = dd
                     inputs_num[k_canon] = num
@@ -481,15 +471,25 @@ else:
             row = {}
             filled_flags = []
             for k_canon, metaF in FIELDS.items():
+                # 1) manual varsa o keçərlidir
                 manual = to_float_or_none(inputs_num[k_canon].value)
+            
+                # 2) manual boşdursa dropdown mətni oxu və orta nöqtəni hesabla
                 if manual is None:
-                    mid = range_mid_any(inputs_bin[k_canon].value)   # '10,40' / '10-40' / (10,40)
+                    lbl = inputs_bin[k_canon].value  # '—' və ya '10-40'
+                    if lbl is None or lbl == '—':
+                        mid = None
+                    else:
+                        mid = range_mid_any(lbl)     # '10-40' → 25.0
                     val = to_float_or_none(mid)
                 else:
                     val = manual
+            
+                # 3) intervala sıxışdır
                 val = snap_to_bounds(val, metaF['min'], metaF['max'])
                 row[k_canon] = val
                 filled_flags.append(val is not None)
+
             
             for k in inputs_cat.keys():
                 v = inputs_cat[k].value
@@ -576,3 +576,4 @@ else:
 
 # ---------------- Run ----------------
 ui.run(host='0.0.0.0', port=PORT, reload=False, show=False)
+
