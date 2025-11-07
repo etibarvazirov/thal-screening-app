@@ -279,10 +279,29 @@ else:
     model_name, skver, calibrated = detect_model_meta(model, meta)
     with ui.card().classes('app-card max-w-6xl mx-auto mt-4'):
         ui.label('Model məlumatları').classes('section-title')
+        # Rəqəmsal: aralıq dropdown + manual input (DROP-IN FIX)
         with ui.grid(columns=3).classes('gap-4'):
-            ui.label(f"Model: {model_name}")
-            ui.label(f"scikit-learn versiyası: {skver}")
-            ui.label(f"Kalibrasiya: {'Bəli' if calibrated else 'Xeyr'}")
+            for k_canon, metaF in FIELDS.items():
+                with ui.column():
+                    ui.label(metaF['label']).classes('text-sm')
+        
+                    # 1) Manual input — ƏVVƏL YARADILIR Kİ, 'num' mövcud olsun
+                    num = ui.number(
+                        label=f"Manual dəyər ( {metaF['min']}–{metaF['max']} )",
+                        min=metaF['min'], max=metaF['max'], step=metaF['step'], value=None
+                    ).props('outlined dense clearable')
+        
+                    # 2) Dropdown: sadə siyahı şəklində; EVENT YOXDUR
+                    range_labels = ['—'] + [f"{a}-{b}" for a, b in metaF['bins']]
+                    dd = ui.select(range_labels, value='—').props('outlined dense')
+        
+                    # İpucu
+                    ui.icon('info').classes('text-gray-500').tooltip(metaF['hint'])
+        
+                    # 3) Referansları saxla
+                    inputs_num[k_canon] = num     # <-- num artıq var
+                    inputs_bin[k_canon] = dd
+
 
     # ---------------- Giriş formu ----------------
     with ui.card().classes('app-card max-w-6xl mx-auto mt-4'):
@@ -471,10 +490,7 @@ else:
             row = {}
             filled_flags = []
             for k_canon, metaF in FIELDS.items():
-                # 1) manual varsa o keçərlidir
                 manual = to_float_or_none(inputs_num[k_canon].value)
-            
-                # 2) manual boşdursa dropdown mətni oxu və orta nöqtəni hesabla
                 if manual is None:
                     lbl = inputs_bin[k_canon].value  # '—' və ya '10-40'
                     if lbl is None or lbl == '—':
@@ -484,11 +500,10 @@ else:
                     val = to_float_or_none(mid)
                 else:
                     val = manual
-            
-                # 3) intervala sıxışdır
                 val = snap_to_bounds(val, metaF['min'], metaF['max'])
                 row[k_canon] = val
                 filled_flags.append(val is not None)
+
 
             
             for k in inputs_cat.keys():
@@ -576,4 +591,5 @@ else:
 
 # ---------------- Run ----------------
 ui.run(host='0.0.0.0', port=PORT, reload=False, show=False)
+
 
