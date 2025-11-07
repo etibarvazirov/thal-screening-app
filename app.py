@@ -4,6 +4,9 @@ import pandas as pd
 import numpy as np
 from nicegui import ui
 
+os.environ["WEB_CONCURRENCY"] = "1"
+
+
 # Heroku uvicorn "workers" default-unun qarşısı
 os.environ.setdefault("WEB_CONCURRENCY", "1")
 PORT = int(os.environ.get('PORT', 8080))
@@ -523,3 +526,4 @@ else:
 
 # ====================== Run ======================
 ui.run(host='0.0.0.0', port=PORT, reload=False, show=False)
+
